@@ -307,7 +307,7 @@ class TodayPageTests(TestCase):
         self.assertContains(
             response,
             suggest_form(
-                response.context["csrf_token"],
+                str(response.context["csrf_token"]),
                 '<button type="submit">Suggest an outfit</button>',
             ),
             html=True,
@@ -332,7 +332,7 @@ class TodayPageTests(TestCase):
         self.assertContains(
             response,
             suggest_form(
-                response.context["csrf_token"],
+                str(response.context["csrf_token"]),
                 '<button type="submit" disabled>Suggest an outfit</button>',
             ),
             html=True,
@@ -406,7 +406,7 @@ class SuggestViewTests(TestCase):
         self.assertContains(
             response,
             suggest_form(
-                response.context["csrf_token"],
+                str(response.context["csrf_token"]),
                 '<button type="submit">Suggest an outfit</button>',
             ),
             html=True,
@@ -450,7 +450,7 @@ class SuggestViewTests(TestCase):
             response,
             "<p>Could not get a valid suggestion. Try again.</p>"
             + suggest_form(
-                response.context["csrf_token"],
+                str(response.context["csrf_token"]),
                 '<button type="submit">Suggest an outfit</button>',
             ),
             html=True,
@@ -472,7 +472,7 @@ class SuggestViewTests(TestCase):
             response,
             "<p>The suggestion service is unavailable right now.</p>"
             + suggest_form(
-                response.context["csrf_token"],
+                str(response.context["csrf_token"]),
                 '<button type="submit">Try again</button>',
             ),
             html=True,
@@ -511,7 +511,7 @@ class SuggestViewTests(TestCase):
         self.assertContains(
             response,
             suggest_form(
-                response.context["csrf_token"],
+                str(response.context["csrf_token"]),
                 '<button type="submit" disabled>Suggest an outfit</button>',
             ),
             html=True,

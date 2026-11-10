@@ -77,14 +77,13 @@ class ClothingItemModelTests(TestCase):
         try:
             call_command(
                 "makemigrations",
-                "wardrobe",
                 "--check",
                 "--dry-run",
                 "--no-input",
                 stdout=output,
             )
         except SystemExit:
-            self.fail(f"The model has changes with no migration:\n{output.getvalue()}")
+            self.fail(f"A model has changes with no migration:\n{output.getvalue()}")
 
 
 class WardrobeListViewTests(TestCase):
