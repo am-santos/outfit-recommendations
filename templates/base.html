@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}What should I wear today?{% endblock %}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; line-height: 1.5; color: #222; max-width: 60rem; margin: 0 auto; padding: 1rem; }
+    nav { border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
+    nav a { margin-right: 1rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="{% url 'wardrobe:list' %}">Wardrobe</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

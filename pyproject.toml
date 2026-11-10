@@ -31,3 +31,8 @@ disallow_untyped_defs = false
 
 [tool.django-stubs]
 django_settings_module = "config.settings"
+
+[tool.ruff.lint]
+# Django declares options as class attributes holding lists (Meta.ordering,
+# choices, a migration's operations), which RUF012 would flag in every app.
+ignore = ["RUF012"]
