@@ -1,0 +1,33 @@
+[project]
+name = "outfit-recommendations"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=5.2,<6",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "django-stubs[compatible-mypy]>=5.2,<5.3",
+    "mypy>=1.13",
+    "ruff>=0.17.4",
+    "types-requests>=2.33.0.20261030",
+]
+
+[tool.mypy]
+plugins = ["mypy_django_plugin.main"]
+disallow_untyped_defs = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "*.migrations.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "*.tests"
+disallow_untyped_defs = false
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
