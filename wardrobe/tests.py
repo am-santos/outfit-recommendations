@@ -1,4 +1,7 @@
-from django.test import TestCase
+import io
+
+from django.core.management import call_command
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from wardrobe import forms, models
@@ -65,6 +68,23 @@ class ClothingItemModelTests(TestCase):
         self.assertEqual(
             names, ["Belt", "Jeans", "Anorak", "Boots", "Cotton shirt", "Wool jumper"]
         )
+
+    def test_model_matches_migrations(self):
+        # A model change with no migration to match, such as a field made
+        # optional or a new choice, would otherwise turn up unasked in the next
+        # makemigrations.
+        output = io.StringIO()
+        try:
+            call_command(
+                "makemigrations",
+                "wardrobe",
+                "--check",
+                "--dry-run",
+                "--no-input",
+                stdout=output,
+            )
+        except SystemExit:
+            self.fail(f"The model has changes with no migration:\n{output.getvalue()}")
 
 
 class WardrobeListViewTests(TestCase):
@@ -216,6 +236,25 @@ class WardrobeCreateViewTests(TestCase):
                 )
                 self.assertFalse(models.ClothingItem.objects.exists())
 
+    def test_size_is_the_only_optional_field(self):
+        # A browser sends a text box left empty as an empty value.
+        response = self.client.post(
+            reverse("wardrobe:add"), {**COAT_FORM_DATA, "size": ""}
+        )
+        self.assertRedirects(response, reverse("wardrobe:list"))
+        self.assertEqual(models.ClothingItem.objects.values("size").get(), {"size": ""})
+        # Every other field must be filled in; the checkboxes can stay unticked.
+        response = self.client.post(reverse("wardrobe:add"), {})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["form"].errors,
+            {
+                field: ["This field is required."]
+                for field in ["name", "category", "colour", "material", "warmth"]
+            },
+        )
+        self.assertEqual(models.ClothingItem.objects.count(), 1)
+
     def test_shows_item_added_message(self):
         response = self.client.post(
             reverse("wardrobe:add"), COAT_FORM_DATA, follow=True
@@ -223,6 +262,15 @@ class WardrobeCreateViewTests(TestCase):
         self.assertContains(
             response, '<ul class="messages"><li>Item added.</li></ul>', html=True
         )
+
+    def test_post_without_csrf_token_is_rejected(self):
+        # The test client skips the CSRF check unless asked to make it. Without
+        # the check, a page on another site could post this form, or the edit
+        # and remove forms, from the owner's browser.
+        client = Client(enforce_csrf_checks=True)
+        response = client.post(reverse("wardrobe:add"), COAT_FORM_DATA)
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(models.ClothingItem.objects.exists())
 
 
 class WardrobeUpdateViewTests(TestCase):
@@ -318,6 +366,16 @@ class WardrobeUpdateViewTests(TestCase):
         self.assertEqual(self.client.post(url, COAT_FORM_DATA).status_code, 404)
         self.assertEqual(models.ClothingItem.objects.count(), 1)
 
+    def test_post_without_csrf_token_is_rejected(self):
+        stored = models.ClothingItem.objects.values(*FORM_FIELDS).get()
+        client = Client(enforce_csrf_checks=True)
+        response = client.post(
+            reverse("wardrobe:edit", args=[self.item.pk]),
+            {**COAT_FORM_DATA, "name": "Navy wool overcoat"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(models.ClothingItem.objects.values(*FORM_FIELDS).get(), stored)
+
 
 class WardrobeDeleteViewTests(TestCase):
     item: models.ClothingItem
@@ -361,4 +419,10 @@ class WardrobeDeleteViewTests(TestCase):
         url = reverse("wardrobe:delete", args=[self.item.pk + 1])
         self.assertEqual(self.client.get(url).status_code, 404)
         self.assertEqual(self.client.post(url).status_code, 404)
+        self.assertTrue(models.ClothingItem.objects.filter(pk=self.item.pk).exists())
+
+    def test_post_without_csrf_token_is_rejected(self):
+        client = Client(enforce_csrf_checks=True)
+        response = client.post(reverse("wardrobe:delete", args=[self.item.pk]))
+        self.assertEqual(response.status_code, 403)
         self.assertTrue(models.ClothingItem.objects.filter(pk=self.item.pk).exists())

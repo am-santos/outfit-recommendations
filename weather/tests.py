@@ -6,7 +6,6 @@ from unittest import mock
 
 import requests
 from django.test import SimpleTestCase
-from django.utils import timezone
 
 from weather import client
 
@@ -207,14 +206,14 @@ class ForecastParsingTests(SimpleTestCase):
         )
 
     def test_uses_local_date_from_response(self):
-        # A city ahead of the server's time zone can already be on the
-        # server's tomorrow. With timezone=auto the response's daily.time is
-        # the city's date, and the forecast uses it rather than the clock.
-        city_today = timezone.localdate() + datetime.timedelta(days=1)
-        payload = forecast_payload(time=city_today.isoformat())
+        # Kiritimati is 14 hours ahead of UTC: from 10:00 on 10 November on a
+        # server in UTC, it is already 11 November there. With timezone=auto
+        # the response's daily.time is the city's date, and the forecast uses
+        # it as it is.
+        payload = forecast_payload(time="2026-11-11")
         payload |= {"timezone": "Pacific/Kiritimati", "utc_offset_seconds": 50400}
         forecast = client.parse_daily(payload, "Kiritimati", "Kiribati")
-        self.assertEqual(forecast.date, city_today)
+        self.assertEqual(forecast.date, datetime.date(2026, 11, 11))
 
     def test_null_value_raises_weather_error(self):
         for name in ["time", *client.DAILY_VARIABLES]:

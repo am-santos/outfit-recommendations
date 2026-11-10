@@ -9,7 +9,7 @@ from unittest import mock
 import anthropic
 import httpx2
 import requests
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
 from suggestions import llm, service
@@ -204,6 +204,24 @@ class TodayPageTests(TestCase):
         )
         self.assertContains(response, ATTRIBUTION, html=True)
         self.assertNotContains(response, "unavailable")
+
+    def test_date_comes_from_forecast_not_server_clock(self, get_today_forecast):
+        # At most one of two dates can be the server's today, so a page showing
+        # the server's date fails for one of them, whatever day the tests run.
+        for date, shown in [
+            (datetime.date(2026, 11, 10), "Tuesday 10 November 2026"),
+            (datetime.date(2026, 11, 11), "Wednesday 11 November 2026"),
+        ]:
+            with self.subTest(date=date):
+                get_today_forecast.return_value = dataclasses.replace(
+                    LISBON_FORECAST, date=date
+                )
+                response = self.client.get(reverse("suggestions:today"))
+                self.assertContains(
+                    response,
+                    f'<time datetime="{date.isoformat()}">{shown}</time>',
+                    html=True,
+                )
 
     def test_shows_forecast_values(self, get_today_forecast):
         get_today_forecast.return_value = dataclasses.replace(
@@ -476,6 +494,16 @@ class SuggestViewTests(TestCase):
             html=True,
         )
 
+    def test_post_without_csrf_token_does_not_call_llm(
+        self, suggest_outfit, get_today_forecast
+    ):
+        # Otherwise a page on another site could make the owner's browser ask
+        # for suggestions, each one a paid LLM call.
+        save_wardrobe()
+        response = Client(enforce_csrf_checks=True).post(reverse("suggestions:today"))
+        self.assertEqual(response.status_code, 403)
+        suggest_outfit.assert_not_called()
+
     def test_logs_llm_error_without_traceback(self, suggest_outfit, get_today_forecast):
         save_wardrobe()
         http_error = llm.LLMError("the Anthropic API returned an error (HTTP 401)")
@@ -592,6 +620,21 @@ class PromptTests(SimpleTestCase):
             "\n"
             "Suggest an outfit using only the ids above.",
         )
+
+    def test_system_prompt_states_the_rules(self):
+        system, _ = service.build_prompt(LISBON_FORECAST, WARDROBE)
+        # Key phrases rather than the whole text, so the wording can be tuned.
+        for phrase in [
+            "using only their ids",
+            "feels-like temperature, chance of rain and wind",
+            "warmth, waterproof and layerable",
+            "1 (very light) to 5 (very warm)",
+            "one bottom, one pair of shoes",
+            "say so in the reason",
+            "Use British English.",
+        ]:
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, system)
 
 
 class ValidationTests(SimpleTestCase):
@@ -828,3 +871,55 @@ class LLMModuleTests(SimpleTestCase):
         create.side_effect = None
         create.return_value = "<html>Blocked by a proxy</html>"
         self.assertEqual(str(self.llm_error()), INVALID_RESPONSE)
+
+
+# Made up, and distinctive enough to be found if it leaked.
+FAKE_KEY = "test-key-5f0c2a9e"
+
+
+# Only the forecast and the SDK's client are replaced: the view, the service
+# and the LLM module run as they are. Nothing is sent.
+@mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": FAKE_KEY})
+@mock.patch("weather.client.get_today_forecast", return_value=LISBON_FORECAST)
+@mock.patch("suggestions.llm.anthropic.Anthropic")
+class EndToEndTests(TestCase):
+    def test_valid_answer_reaches_the_page(self, Anthropic, get_today_forecast):
+        save_wardrobe()
+        create = Anthropic.return_value.messages.create
+        create.return_value = fake_message(json.dumps(VALID_ANSWER))
+        response = self.client.post(reverse("suggestions:today"))
+        # The prompt lists the saved wardrobe with its ids...
+        _, user = service.build_prompt(LISBON_FORECAST, WARDROBE)
+        self.assertEqual(
+            create.call_args.kwargs["messages"], [{"role": "user", "content": user}]
+        )
+        # ...and the ids in the answer bring back the saved items, in the
+        # answer's order, shown with the reason.
+        self.assertEqual(
+            [item.name for item in response.context["suggestion"].items],
+            ["Blue jeans", "White T-shirt", "Navy wool coat", "Leather boots"],
+        )
+        self.assertContains(response, f"<p>{REASON}</p>", html=True)
+
+    def test_key_appears_in_no_page_or_log_line(self, Anthropic, get_today_forecast):
+        save_wardrobe()
+        # The worst case: the provider's error message quotes the key.
+        Anthropic.return_value.messages.create.side_effect = status_error(
+            anthropic.AuthenticationError,
+            401,
+            "authentication_error",
+            f"invalid x-api-key: {FAKE_KEY}",
+        )
+        # Every logger, not only the view's; a traceback attached to a line
+        # would be part of its output.
+        with self.assertLogs() as logs:
+            response = self.client.post(reverse("suggestions:today"))
+        # The LLM module ran, with the key from the environment.
+        Anthropic.assert_called_once_with(api_key=FAKE_KEY, timeout=30.0, max_retries=1)
+        self.assertContains(
+            response,
+            "<p>The suggestion service is unavailable right now.</p>",
+            html=True,
+        )
+        self.assertNotIn(FAKE_KEY.encode(), response.content)
+        self.assertNotIn(FAKE_KEY, "\n".join(logs.output))
