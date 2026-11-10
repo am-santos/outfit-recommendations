@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Today – {{ block.super }}{% endblock %}
+
+{% block content %}
+  <h1>Today</h1>
+  {% if forecast %}
+    <h2>{{ forecast.city }}{% if forecast.country %}, {{ forecast.country }}{% endif %}</h2>
+    {# The city's own date, taken from the forecast response. #}
+    <p><time datetime="{{ forecast.date|date:'Y-m-d' }}">{{ forecast.date|date:'l j F Y' }}</time></p>
+    <ul>
+      <li>Temperature: {{ forecast.temperature_min|floatformat }}–{{ forecast.temperature_max|floatformat }} °C</li>
+      <li>Feels like: {{ forecast.feels_like_min|floatformat }}–{{ forecast.feels_like_max|floatformat }} °C</li>
+      <li>Chance of rain: {{ forecast.rain_chance }}%</li>
+      <li>Wind: up to {{ forecast.wind_max|floatformat }} km/h</li>
+    </ul>
+    <p><a href="https://open-meteo.com/">Weather data by Open-Meteo.com</a></p>
+  {% else %}
+    <p>Today's forecast is unavailable: {{ weather_error }}.</p>
+  {% endif %}
+  <p>Your wardrobe has {{ item_count }} item{{ item_count|pluralize }}.</p>
+  {# A placeholder: the button does nothing yet. #}
+  <button type="button" disabled>Suggest an outfit</button>
+{% endblock %}
