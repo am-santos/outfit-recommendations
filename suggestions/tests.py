@@ -1,11 +1,17 @@
 import dataclasses
 import datetime
+import json
+import os
+from typing import Any
 from unittest import mock
 
+import anthropic
+import httpx2
 import requests
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 
+from suggestions import llm, service
 from wardrobe import models
 from weather import client
 
@@ -28,6 +34,132 @@ def create_item(name: str) -> models.ClothingItem:
     return models.ClothingItem.objects.create(
         name=name, category="top", colour="White", material="cotton", warmth=1
     )
+
+
+# A wardrobe in the list page's order (category, then name), with fixed ids.
+# The items are not saved: the prompt and the checks need no database.
+SCARF = models.ClothingItem(
+    id=14,
+    name="Grey scarf",
+    category="accessory",
+    colour="Grey",
+    size="One size",
+    material="wool",
+    warmth=4,
+)
+JEANS = models.ClothingItem(
+    id=9,
+    name="Blue jeans",
+    category="bottom",
+    colour="Blue",
+    size="W32 L34",
+    material="denim",
+    warmth=3,
+)
+COAT = models.ClothingItem(
+    id=7,
+    name="Navy wool coat",
+    category="outer",
+    colour="Navy",
+    size="XL",
+    material="wool",
+    warmth=5,
+)
+BOOTS = models.ClothingItem(
+    id=12,
+    name="Leather boots",
+    category="shoes",
+    colour="Brown",
+    size="UK 9",
+    material="leather",
+    warmth=3,
+    waterproof=True,
+)
+SHIRT = models.ClothingItem(
+    id=3,
+    name="White T-shirt",
+    category="top",
+    colour="White",
+    size="Medium",
+    material="cotton",
+    warmth=1,
+    layerable=True,
+)
+WARDROBE = [SCARF, JEANS, COAT, BOOTS, SHIRT]
+ITEMS_BY_ID = {item.pk: item for item in WARDROBE}
+
+REASON = "Jeans and a T-shirt under the wool coat, with boots in case of rain."
+VALID_ANSWER = {"item_ids": [9, 3, 7, 12], "reason": REASON}
+
+# The response schema from the plan.
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "item_ids": {"type": "array", "items": {"type": "integer"}},
+        "reason": {"type": "string"},
+    },
+    "required": ["item_ids", "reason"],
+    "additionalProperties": False,
+}
+
+# complete_json passes on whatever schema it is given.
+ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {"answer": {"type": "string"}},
+    "required": ["answer"],
+    "additionalProperties": False,
+}
+
+INVALID_RESPONSE = "the Anthropic API sent an invalid response"
+
+MESSAGES_REQUEST = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+
+
+def fake_message(
+    text: str | None, stop_reason: anthropic.types.StopReason = "end_turn"
+) -> anthropic.types.Message:
+    """A Messages API response: a thinking block, then the text block if any."""
+    content: list[anthropic.types.ContentBlock] = [
+        # Thinking text is left out by default: the block holds a signature.
+        anthropic.types.ThinkingBlock(type="thinking", thinking="", signature="c2ln")
+    ]
+    if text is not None:
+        content.append(anthropic.types.TextBlock(type="text", text=text))
+    return anthropic.types.Message(
+        id="msg_01",
+        type="message",
+        role="assistant",
+        model="claude-haiku-5-5",
+        content=content,
+        stop_reason=stop_reason,
+        stop_sequence=None,
+        usage=anthropic.types.Usage(input_tokens=1500, output_tokens=400),
+    )
+
+
+def status_error(
+    error_class: type[anthropic.APIStatusError],
+    status: int,
+    error_type: str,
+    message: str,
+) -> anthropic.APIStatusError:
+    """An HTTP error from the API, built the way the SDK builds it."""
+    body = {
+        "type": "error",
+        "error": {"type": error_type, "message": message},
+        "request_id": "req_01",
+    }
+    response = httpx2.Response(status, request=MESSAGES_REQUEST, json=body)
+    return error_class(f"Error code: {status} - {body}", response=response, body=body)
+
+
+def rejection_message(data: dict[str, Any]) -> str:
+    """Check the answer, which must be rejected; return the problem it names."""
+    try:
+        service.parse_suggestion(data, ITEMS_BY_ID)
+    except service.InvalidSuggestion as exc:
+        return str(exc)
+    raise AssertionError("InvalidSuggestion not raised")
 
 
 @mock.patch("weather.client.get_today_forecast", return_value=LISBON_FORECAST)
@@ -147,3 +279,302 @@ class TodayPageTests(TestCase):
             '<nav><a href="/">Today</a><a href="/wardrobe/">Wardrobe</a></nav>',
             html=True,
         )
+
+
+class PromptTests(SimpleTestCase):
+    def test_prompt_lists_every_item_with_id_and_attributes(self):
+        _, user = service.build_prompt(LISBON_FORECAST, WARDROBE)
+        self.assertIn(
+            "Wardrobe:\n"
+            "- id 14: accessory — Grey scarf, colour Grey, material wool, warmth 4, "
+            "not waterproof, not layerable\n"
+            "- id 9: bottom — Blue jeans, colour Blue, material denim, warmth 3, "
+            "not waterproof, not layerable\n"
+            "- id 7: outer layer — Navy wool coat, colour Navy, material wool, "
+            "warmth 5, not waterproof, not layerable\n"
+            "- id 12: shoes — Leather boots, colour Brown, material leather, "
+            "warmth 3, waterproof, not layerable\n"
+            "- id 3: top — White T-shirt, colour White, material cotton, warmth 1, "
+            "not waterproof, layerable\n",
+            user,
+        )
+
+    def test_prompt_includes_forecast_values(self):
+        _, user = service.build_prompt(LISBON_FORECAST, WARDROBE)
+        self.assertIn(
+            "Today's forecast (2026-11-10):\n"
+            "- Temperature 13.4–19.5 °C, feels like 11.7–18.2 °C\n"
+            "- Chance of rain 60%, max wind 25.3 km/h\n",
+            user,
+        )
+        # As on the today page, a whole number has no decimal place.
+        forecast = dataclasses.replace(
+            LISBON_FORECAST, temperature_min=13.0, wind_max=25.0
+        )
+        _, user = service.build_prompt(forecast, WARDROBE)
+        self.assertIn("- Temperature 13–19.5 °C,", user)
+        self.assertIn("max wind 25 km/h", user)
+
+    def test_prompt_does_not_include_city_name(self):
+        prompt = "\n".join(service.build_prompt(LISBON_FORECAST, WARDROBE))
+        self.assertNotIn("Lisbon", prompt)
+        self.assertNotIn("Portugal", prompt)
+
+    def test_prompt_does_not_include_size(self):
+        prompt = "\n".join(service.build_prompt(LISBON_FORECAST, WARDROBE))
+        for item in WARDROBE:
+            with self.subTest(size=item.size):
+                self.assertNotIn(item.size, prompt)
+        self.assertNotIn("size", prompt.lower())
+
+    def test_user_message_has_forecast_wardrobe_and_task_sections(self):
+        system, user = service.build_prompt(LISBON_FORECAST, [SHIRT])
+        self.assertEqual(system, service.SYSTEM_PROMPT)
+        self.assertEqual(
+            user,
+            "Today's forecast (2026-11-10):\n"
+            "- Temperature 13.4–19.5 °C, feels like 11.7–18.2 °C\n"
+            "- Chance of rain 60%, max wind 25.3 km/h\n"
+            "\n"
+            "Wardrobe:\n"
+            "- id 3: top — White T-shirt, colour White, material cotton, warmth 1, "
+            "not waterproof, layerable\n"
+            "\n"
+            "Suggest an outfit using only the ids above.",
+        )
+
+
+class ValidationTests(SimpleTestCase):
+    def test_valid_response_returns_items_in_order(self):
+        suggestion = service.parse_suggestion(VALID_ANSWER, ITEMS_BY_ID)
+        # The LLM's order, not the wardrobe's.
+        self.assertEqual(
+            suggestion,
+            service.Suggestion(items=[JEANS, SHIRT, COAT, BOOTS], reason=REASON),
+        )
+
+    def test_unknown_item_is_rejected(self):
+        # The whole answer is rejected, not only the unknown ids.
+        self.assertEqual(
+            rejection_message({"item_ids": [9, 42, 3, 12, 99], "reason": REASON}),
+            "used ids that are not in the wardrobe: 42, 99",
+        )
+
+    def test_empty_item_list_is_rejected(self):
+        self.assertEqual(
+            rejection_message({"item_ids": [], "reason": REASON}), "chose no items"
+        )
+
+    def test_duplicate_item_is_rejected(self):
+        self.assertEqual(
+            rejection_message({"item_ids": [9, 3, 9, 12, 3, 9], "reason": REASON}),
+            "repeated ids: 9, 3",
+        )
+
+    def test_missing_reason_is_rejected(self):
+        answers: list[dict[str, Any]] = [
+            {"item_ids": [9, 3]},
+            {"item_ids": [9, 3], "reason": None},
+            {"item_ids": [9, 3], "reason": ""},
+            {"item_ids": [9, 3], "reason": "   "},
+        ]
+        for answer in answers:
+            with self.subTest(answer=answer):
+                self.assertEqual(rejection_message(answer), "gave no reason")
+
+    def test_item_ids_must_be_a_list_of_integers(self):
+        # JSON true loads as True, which Python would treat as the id 1.
+        answers: list[dict[str, Any]] = [
+            {"reason": REASON},
+            {"item_ids": None, "reason": REASON},
+            {"item_ids": "9, 3", "reason": REASON},
+            {"item_ids": 9, "reason": REASON},
+            {"item_ids": [9, "3"], "reason": REASON},
+            {"item_ids": [9, 3.0], "reason": REASON},
+            {"item_ids": [9, True], "reason": REASON},
+        ]
+        for answer in answers:
+            with self.subTest(answer=answer):
+                self.assertEqual(
+                    rejection_message(answer),
+                    "did not give item_ids as a list of integers",
+                )
+
+
+@mock.patch("suggestions.llm.complete_json")
+class SuggestOutfitTests(SimpleTestCase):
+    def setUp(self):
+        self.system, self.user = service.build_prompt(LISBON_FORECAST, WARDROBE)
+
+    def test_sends_prompt_and_schema_and_returns_suggestion(self, complete_json):
+        complete_json.return_value = VALID_ANSWER
+        suggestion = service.suggest_outfit(LISBON_FORECAST, WARDROBE)
+        self.assertEqual(
+            suggestion,
+            service.Suggestion(items=[JEANS, SHIRT, COAT, BOOTS], reason=REASON),
+        )
+        complete_json.assert_called_once_with(self.system, self.user, RESPONSE_SCHEMA)
+
+    def test_retries_once_after_invalid_response(self, complete_json):
+        complete_json.side_effect = [
+            {"item_ids": [9, 3, 42, 12, 99], "reason": REASON},
+            VALID_ANSWER,
+        ]
+        suggestion = service.suggest_outfit(LISBON_FORECAST, WARDROBE)
+        self.assertEqual(suggestion.items, [JEANS, SHIRT, COAT, BOOTS])
+        # The retry adds one line naming the problem to the user message.
+        retry = (
+            f"{self.user}\n\n"
+            "Your previous answer used ids that are not in the wardrobe: 42, 99."
+        )
+        self.assertEqual(
+            complete_json.call_args_list,
+            [
+                mock.call(self.system, self.user, RESPONSE_SCHEMA),
+                mock.call(self.system, retry, RESPONSE_SCHEMA),
+            ],
+        )
+
+    def test_gives_up_after_second_invalid_response(self, complete_json):
+        complete_json.side_effect = [
+            {"item_ids": [9, 42], "reason": REASON},
+            {"item_ids": [], "reason": REASON},
+        ]
+        with self.assertRaises(service.InvalidSuggestion) as raised:
+            service.suggest_outfit(LISBON_FORECAST, WARDROBE)
+        self.assertEqual(str(raised.exception), "chose no items")
+        self.assertEqual(complete_json.call_count, 2)
+
+    def test_llm_error_propagates(self, complete_json):
+        error = llm.LLMError("the Anthropic API timed out")
+        complete_json.side_effect = error
+        with self.assertRaises(llm.LLMError) as raised:
+            service.suggest_outfit(LISBON_FORECAST, WARDROBE)
+        self.assertIs(raised.exception, error)
+        complete_json.assert_called_once()
+        # An LLMError from the retry is not retried either.
+        complete_json.reset_mock()
+        complete_json.side_effect = [{"item_ids": [42], "reason": REASON}, error]
+        with self.assertRaises(llm.LLMError) as raised:
+            service.suggest_outfit(LISBON_FORECAST, WARDROBE)
+        self.assertIs(raised.exception, error)
+        self.assertEqual(complete_json.call_count, 2)
+
+
+# The key is fake, and the client is a mock: nothing is sent.
+@mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"})
+@mock.patch("suggestions.llm.anthropic.Anthropic")
+class LLMModuleTests(SimpleTestCase):
+    def llm_error(self) -> llm.LLMError:
+        """Call complete_json, which must raise LLMError; return the error."""
+        with self.assertRaises(llm.LLMError) as raised:
+            llm.complete_json("System prompt", "User prompt", ANSWER_SCHEMA)
+        return raised.exception
+
+    def test_returns_parsed_json_from_text_block(self, Anthropic):
+        create = Anthropic.return_value.messages.create
+        create.return_value = fake_message('{"answer": "yes"}')
+        self.assertEqual(
+            llm.complete_json("System prompt", "User prompt", ANSWER_SCHEMA),
+            {"answer": "yes"},
+        )
+
+    @override_settings(LLM_MODEL="claude-sonnet-5-5")
+    def test_sends_prompt_and_schema_to_configured_model(self, Anthropic):
+        create = Anthropic.return_value.messages.create
+        create.return_value = fake_message('{"answer": "yes"}')
+        llm.complete_json("System prompt", "User prompt", ANSWER_SCHEMA)
+        Anthropic.assert_called_once_with(
+            api_key="test-key", timeout=30.0, max_retries=1
+        )
+        # Only these parameters: no thinking, effort or temperature.
+        create.assert_called_once_with(
+            model="claude-sonnet-5-5",
+            max_tokens=16000,
+            system="System prompt",
+            messages=[{"role": "user", "content": "User prompt"}],
+            output_config={"format": {"type": "json_schema", "schema": ANSWER_SCHEMA}},
+        )
+
+    def test_missing_key_is_llm_error(self, Anthropic):
+        with mock.patch.dict(os.environ):
+            del os.environ["ANTHROPIC_API_KEY"]
+            self.assertEqual(str(self.llm_error()), "ANTHROPIC_API_KEY is not set")
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
+            self.assertEqual(str(self.llm_error()), "ANTHROPIC_API_KEY is not set")
+        # No client was created.
+        Anthropic.assert_not_called()
+
+    def test_sdk_error_becomes_llm_error(self, Anthropic):
+        create = Anthropic.return_value.messages.create
+        for error, message in [
+            (
+                anthropic.APIConnectionError(request=MESSAGES_REQUEST),
+                "the Anthropic API could not be reached",
+            ),
+            (
+                anthropic.APITimeoutError(request=MESSAGES_REQUEST),
+                "the Anthropic API timed out",
+            ),
+            (
+                status_error(
+                    anthropic.AuthenticationError,
+                    401,
+                    "authentication_error",
+                    "invalid x-api-key",
+                ),
+                "the Anthropic API returned an error (HTTP 401)",
+            ),
+            (
+                status_error(
+                    anthropic.OverloadedError, 529, "overloaded_error", "Overloaded"
+                ),
+                "the Anthropic API returned an error (HTTP 529)",
+            ),
+            (
+                anthropic.APIResponseValidationError(
+                    httpx2.Response(200, request=MESSAGES_REQUEST), None
+                ),
+                INVALID_RESPONSE,
+            ),
+        ]:
+            with self.subTest(error=type(error).__name__):
+                create.side_effect = error
+                exc = self.llm_error()
+                # A fixed message: the SDK's own one can quote the response body.
+                self.assertEqual(str(exc), message)
+                self.assertIs(exc.__cause__, error)
+
+    def test_unexpected_stop_reason_is_llm_error(self, Anthropic):
+        create = Anthropic.return_value.messages.create
+        # Thinking used up max_tokens before the answer was finished.
+        create.return_value = fake_message('{"answer": "y', stop_reason="max_tokens")
+        self.assertEqual(str(self.llm_error()), "the model stopped early (max_tokens)")
+        create.return_value = fake_message(None, stop_reason="refusal")
+        self.assertEqual(str(self.llm_error()), "the model stopped early (refusal)")
+
+    def test_invalid_json_is_llm_error(self, Anthropic):
+        create = Anthropic.return_value.messages.create
+        for text in [
+            "Jeans and boots, in case of rain.",
+            "",
+            '{"answer": "yes"',
+            '["yes"]',  # valid JSON, but not an object
+            None,  # no text block, only the thinking block
+        ]:
+            with self.subTest(text=text):
+                create.return_value = fake_message(text)
+                self.assertEqual(str(self.llm_error()), INVALID_RESPONSE)
+
+    def test_malformed_response_body_is_llm_error(self, Anthropic):
+        create = Anthropic.return_value.messages.create
+        # With HTTP 200, the SDK raises JSONDecodeError for a body that is not
+        # valid JSON...
+        create.side_effect = json.JSONDecodeError(
+            "Expecting property name enclosed in double quotes", "{not json", 1
+        )
+        self.assertEqual(str(self.llm_error()), INVALID_RESPONSE)
+        # ...and returns the text for a body that is not JSON at all.
+        create.side_effect = None
+        create.return_value = "<html>Blocked by a proxy</html>"
+        self.assertEqual(str(self.llm_error()), INVALID_RESPONSE)
