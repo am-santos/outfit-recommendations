@@ -252,7 +252,9 @@ class ForecastParsingTests(SimpleTestCase):
 # in full, so none of them can carry a URL, coordinates or a traceback.
 @mock.patch("weather.client.requests.get")
 class ForecastErrorTests(SimpleTestCase):
-    def forecast_error_message(self, get, forecast_response):
+    def forecast_error_message(
+        self, get: mock.MagicMock, forecast_response: requests.Response | Exception
+    ) -> str:
         get.side_effect = [fake_response(GEOCODING_PAYLOAD), forecast_response]
         return weather_error_message(client.get_today_forecast, "Lisbon")
 

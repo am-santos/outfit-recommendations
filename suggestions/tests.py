@@ -42,12 +42,12 @@ def create_item(name: str) -> models.ClothingItem:
     )
 
 
-def suggest_form(response, button: str) -> str:
+def suggest_form(csrf_token: str, button: str) -> str:
     """The Suggest form, posting to the today page, with the page's CSRF token."""
     return (
         '<form method="post" action="/">'
         '<input type="hidden" name="csrfmiddlewaretoken" '
-        f'value="{response.context["csrf_token"]}">'
+        f'value="{csrf_token}">'
         f"{button}</form>"
     )
 
@@ -116,7 +116,7 @@ def save_wardrobe() -> None:
 REASON = "Jeans and a T-shirt under the wool coat, with boots in case of rain."
 VALID_ANSWER = {"item_ids": [9, 3, 7, 12], "reason": REASON}
 
-# The response schema from the plan.
+# The schema sent with every request: item ids and a reason, nothing else.
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -306,7 +306,10 @@ class TodayPageTests(TestCase):
         response = self.client.get(reverse("suggestions:today"))
         self.assertContains(
             response,
-            suggest_form(response, '<button type="submit">Suggest an outfit</button>'),
+            suggest_form(
+                response.context["csrf_token"],
+                '<button type="submit">Suggest an outfit</button>',
+            ),
             html=True,
         )
         self.assertNotContains(response, "Add some clothes")
@@ -329,7 +332,8 @@ class TodayPageTests(TestCase):
         self.assertContains(
             response,
             suggest_form(
-                response, '<button type="submit" disabled>Suggest an outfit</button>'
+                response.context["csrf_token"],
+                '<button type="submit" disabled>Suggest an outfit</button>',
             ),
             html=True,
         )
@@ -364,7 +368,7 @@ class SuggestViewTests(TestCase):
     ):
         save_wardrobe()
         suggest_outfit.return_value = service.Suggestion(
-            items=[JEANS, SHIRT, COAT, BOOTS], reason=REASON
+            items=(JEANS, SHIRT, COAT, BOOTS), reason=REASON
         )
         response = self.client.post(reverse("suggestions:today"))
         self.assertEqual(response.status_code, 200)
@@ -401,14 +405,17 @@ class SuggestViewTests(TestCase):
         # The form stays, to ask for another suggestion.
         self.assertContains(
             response,
-            suggest_form(response, '<button type="submit">Suggest an outfit</button>'),
+            suggest_form(
+                response.context["csrf_token"],
+                '<button type="submit">Suggest an outfit</button>',
+            ),
             html=True,
         )
 
     def test_reason_is_escaped(self, suggest_outfit, get_today_forecast):
         save_wardrobe()
         suggest_outfit.return_value = service.Suggestion(
-            items=[JEANS], reason='Jeans <script>alert("rain")</script> & boots'
+            items=(JEANS,), reason='Jeans <script>alert("rain")</script> & boots'
         )
         response = self.client.post(reverse("suggestions:today"))
         # The reason is the LLM's text: it is shown as text, never as markup.
@@ -418,6 +425,17 @@ class SuggestViewTests(TestCase):
             "&amp; boots</p>",
         )
         self.assertNotContains(response, "<script")
+
+    def test_reason_keeps_its_line_breaks(self, suggest_outfit, get_today_forecast):
+        save_wardrobe()
+        suggest_outfit.return_value = service.Suggestion(
+            items=(JEANS,), reason="Jeans for the cold.\nBoots for the rain."
+        )
+        response = self.client.post(reverse("suggestions:today"))
+        # A line break in the LLM's text stays a line break on the page.
+        self.assertContains(
+            response, "<p>Jeans for the cold.<br>Boots for the rain.</p>"
+        )
 
     def test_shows_message_when_suggestion_rejected(
         self, suggest_outfit, get_today_forecast
@@ -432,7 +450,8 @@ class SuggestViewTests(TestCase):
             response,
             "<p>Could not get a valid suggestion. Try again.</p>"
             + suggest_form(
-                response, '<button type="submit">Suggest an outfit</button>'
+                response.context["csrf_token"],
+                '<button type="submit">Suggest an outfit</button>',
             ),
             html=True,
         )
@@ -452,7 +471,10 @@ class SuggestViewTests(TestCase):
         self.assertContains(
             response,
             "<p>The suggestion service is unavailable right now.</p>"
-            + suggest_form(response, '<button type="submit">Try again</button>'),
+            + suggest_form(
+                response.context["csrf_token"],
+                '<button type="submit">Try again</button>',
+            ),
             html=True,
         )
         self.assertNotContains(response, "Suggest an outfit")
@@ -489,7 +511,8 @@ class SuggestViewTests(TestCase):
         self.assertContains(
             response,
             suggest_form(
-                response, '<button type="submit" disabled>Suggest an outfit</button>'
+                response.context["csrf_token"],
+                '<button type="submit" disabled>Suggest an outfit</button>',
             ),
             html=True,
         )
@@ -643,7 +666,7 @@ class ValidationTests(SimpleTestCase):
         # The LLM's order, not the wardrobe's.
         self.assertEqual(
             suggestion,
-            service.Suggestion(items=[JEANS, SHIRT, COAT, BOOTS], reason=REASON),
+            service.Suggestion(items=(JEANS, SHIRT, COAT, BOOTS), reason=REASON),
         )
 
     def test_unknown_item_is_rejected(self):
@@ -704,7 +727,7 @@ class SuggestOutfitTests(SimpleTestCase):
         suggestion = service.suggest_outfit(LISBON_FORECAST, WARDROBE)
         self.assertEqual(
             suggestion,
-            service.Suggestion(items=[JEANS, SHIRT, COAT, BOOTS], reason=REASON),
+            service.Suggestion(items=(JEANS, SHIRT, COAT, BOOTS), reason=REASON),
         )
         complete_json.assert_called_once_with(self.system, self.user, RESPONSE_SCHEMA)
 
@@ -714,7 +737,7 @@ class SuggestOutfitTests(SimpleTestCase):
             VALID_ANSWER,
         ]
         suggestion = service.suggest_outfit(LISBON_FORECAST, WARDROBE)
-        self.assertEqual(suggestion.items, [JEANS, SHIRT, COAT, BOOTS])
+        self.assertEqual(suggestion.items, (JEANS, SHIRT, COAT, BOOTS))
         # The retry adds one line naming the problem to the user message.
         retry = (
             f"{self.user}\n\n"

@@ -19,8 +19,7 @@ dev = [
 
 [tool.mypy]
 plugins = ["mypy_django_plugin.main"]
-disallow_untyped_defs = true
-check_untyped_defs = true
+strict = true
 
 [[tool.mypy.overrides]]
 module = "*.migrations.*"

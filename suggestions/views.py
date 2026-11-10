@@ -38,7 +38,7 @@ class TodayView(TemplateView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         # The forecast is fetched again, for the page and for the suggestion.
         context = self.get_context_data(**kwargs)
-        forecast = context["forecast"]
+        forecast: client.Forecast | None = context["forecast"]
         items = list(models.ClothingItem.objects.all())
         # With no forecast or no clothes, the page is the same as for a GET and
         # the LLM is not called.

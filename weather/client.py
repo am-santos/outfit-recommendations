@@ -76,7 +76,7 @@ def geocode(city: str) -> tuple[float, float, str, str]:
             top["name"],
             top.get("country", ""),
         )
-    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise WeatherError(INVALID_RESPONSE) from exc
 
 

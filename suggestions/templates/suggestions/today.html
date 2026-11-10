@@ -51,7 +51,7 @@
         {% endfor %}
       </tbody>
     </table>
-    <p>{{ suggestion.reason }}</p>
+    <p>{{ suggestion.reason|linebreaksbr }}</p>
   {% elif suggestion_rejected %}
     <p>Could not get a valid suggestion. Try again.</p>
   {% elif suggestion_unavailable %}

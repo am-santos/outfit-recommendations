@@ -48,7 +48,7 @@ class InvalidSuggestion(Exception):
 
 @dataclass(frozen=True)
 class Suggestion:
-    items: list[models.ClothingItem]  # in the order the LLM gave them
+    items: tuple[models.ClothingItem, ...]  # in the order the LLM gave them
     reason: str
 
 
@@ -115,7 +115,7 @@ def parse_suggestion(
     reason = data.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         raise InvalidSuggestion("gave no reason")
-    return Suggestion(items=[items_by_id[i] for i in item_ids], reason=reason)
+    return Suggestion(items=tuple(items_by_id[i] for i in item_ids), reason=reason)
 
 
 def _forecast_section(forecast: client.Forecast) -> str:
