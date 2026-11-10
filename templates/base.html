@@ -10,6 +10,8 @@
     nav a { margin-right: 1rem; }
     table { border-collapse: collapse; width: 100%; }
     th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #ddd; }
+    .messages { list-style: none; padding: 0.5rem 1rem; background: #eef6ee; border: 1px solid #b5d6b5; }
+    .errorlist { color: #b00; }
   </style>
 </head>
 <body>
@@ -19,6 +21,13 @@
     </nav>
   </header>
   <main>
+    {% if messages %}
+      <ul class="messages">
+        {% for message in messages %}
+          <li>{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 </body>

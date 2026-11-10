@@ -4,6 +4,7 @@
 
 {% block content %}
   <h1>Wardrobe</h1>
+  <p><a href="{% url 'wardrobe:add' %}">Add an item</a></p>
   {% if items %}
     <table>
       <thead>
@@ -16,6 +17,7 @@
           <th scope="col">Warmth</th>
           <th scope="col">Waterproof</th>
           <th scope="col">Layerable</th>
+          <th scope="col">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -29,6 +31,10 @@
             <td>{{ item.get_warmth_display }}</td>
             <td>{{ item.waterproof|yesno:"Yes,No" }}</td>
             <td>{{ item.layerable|yesno:"Yes,No" }}</td>
+            <td>
+              <a href="{% url 'wardrobe:edit' item.pk %}">Edit</a>
+              <a href="{% url 'wardrobe:delete' item.pk %}">Remove</a>
+            </td>
           </tr>
         {% endfor %}
       </tbody>

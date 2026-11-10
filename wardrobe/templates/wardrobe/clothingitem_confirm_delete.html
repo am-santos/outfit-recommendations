@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Remove item – {{ block.super }}{% endblock %}
+
+{% block content %}
+  <h1>Remove item</h1>
+  <p>Remove {{ object.name }} from your wardrobe?</p>
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit">Remove</button>
+    <a href="{% url 'wardrobe:list' %}">Cancel</a>
+  </form>
+{% endblock %}

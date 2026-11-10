@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{# Shared by the add and edit pages; only the edit page has an object. #}
+
+{% block title %}{% if object %}Edit item{% else %}Add an item{% endif %} – {{ block.super }}{% endblock %}
+
+{% block content %}
+  <h1>{% if object %}Edit item{% else %}Add an item{% endif %}</h1>
+  <form method="post">
+    {% csrf_token %}
+    {{ form }}
+    <button type="submit">Save</button>
+    <a href="{% url 'wardrobe:list' %}">Cancel</a>
+  </form>
+{% endblock %}
