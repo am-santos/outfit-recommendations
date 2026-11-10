@@ -4,7 +4,7 @@ A personal web app that answers one question each morning: **what should I wear 
 
 It combines today's weather forecast with the clothes I own, and it adjusts to my feedback. If yesterday's outfit felt too cold, too warm or not waterproof enough, tomorrow's suggestion takes that into account.
 
-> **Status:** planning. This README describes the planned features and tech stack. No application code yet.
+> **Status:** proof of concept. The wardrobe, today's forecast and LLM outfit suggestions work locally. Daily feedback comes next (see the [roadmap](#roadmap)).
 
 ## Scope
 
@@ -65,16 +65,29 @@ Move the database from SQLite to PostgreSQL once the app is deployed to a host w
 | Framework | Django (backend **and** frontend) | Django (backend and REST API) |
 | Frontend | Server-rendered Django templates and forms | Next.js, consuming the Django REST API |
 | Database | SQLite | PostgreSQL |
-| Outfit suggestions | An LLM via its API (provider to be decided) | Same; also used to read clothing and outfit photos |
+| Outfit suggestions | An LLM via its API (Anthropic Claude, Haiku 5.5) | Same; also used to read clothing and outfit photos |
 | Weather data | Open-Meteo (free, no API key; provides temperature, feels-like, chance of rain and wind) | Same |
 | Dependencies | uv | uv |
 | Tests | Django's test framework | Django's test framework |
+| Linting and types | Ruff; mypy in strict mode with django-stubs | Same |
 
 ## Roadmap
 
 1. **Proof of concept:** wardrobe (1), forecast (2) and LLM outfit suggestion (3), all in Django.
 2. **MVP:** daily feedback (4) and suggestions that use past feedback (5).
 3. **Later:** adding clothes and logging outfits from photos, the REST API and Next.js frontend, and the move to PostgreSQL.
+
+## Run locally
+
+You need [uv](https://docs.astral.sh/uv/). From the repository root:
+
+1. `uv sync` installs the dependencies.
+2. `cp .env.example .env`, then fill in `.env`; no `manage.py` command runs without it. Set `DJANGO_SECRET_KEY` to the output of `uv run python -c "import secrets; print(secrets.token_urlsafe(50))"`, and put your Anthropic API key in `ANTHROPIC_API_KEY`.
+3. `uv run manage.py migrate` creates the SQLite database.
+4. `uv run manage.py runserver` serves the app at <http://127.0.0.1:8000/>.
+5. `uv run manage.py test` runs the tests, which need no network access or API key.
+
+Code checks: `uv run ruff check`, `uv run ruff format --check` and `uv run mypy .`
 
 ## Ownership and licence
 
