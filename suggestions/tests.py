@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import datetime
 import json
@@ -29,10 +30,25 @@ LISBON_FORECAST = client.Forecast(
 
 ATTRIBUTION = '<a href="https://open-meteo.com/">Weather data by Open-Meteo.com</a>'
 
+# Shown instead of the Suggest form when the wardrobe is empty.
+ADD_CLOTHES = (
+    '<p><a href="/wardrobe/add/">Add some clothes</a> to your wardrobe first.</p>'
+)
+
 
 def create_item(name: str) -> models.ClothingItem:
     return models.ClothingItem.objects.create(
         name=name, category="top", colour="White", material="cotton", warmth=1
+    )
+
+
+def suggest_form(response, button: str) -> str:
+    """The Suggest form, posting to the today page, with the page's CSRF token."""
+    return (
+        '<form method="post" action="/">'
+        '<input type="hidden" name="csrfmiddlewaretoken" '
+        f'value="{response.context["csrf_token"]}">'
+        f"{button}</form>"
     )
 
 
@@ -87,6 +103,15 @@ SHIRT = models.ClothingItem(
 )
 WARDROBE = [SCARF, JEANS, COAT, BOOTS, SHIRT]
 ITEMS_BY_ID = {item.pk: item for item in WARDROBE}
+
+
+def save_wardrobe() -> None:
+    """Save the wardrobe above, with its ids, for the view tests.
+
+    Copies are saved, so the items above stay as they are.
+    """
+    models.ClothingItem.objects.bulk_create([copy.copy(item) for item in WARDROBE])
+
 
 REASON = "Jeans and a T-shirt under the wool coat, with boots in case of rain."
 VALID_ANSWER = {"item_ids": [9, 3, 7, 12], "reason": REASON}
@@ -258,15 +283,47 @@ class TodayPageTests(TestCase):
             self.client.get(url), "<p>Your wardrobe has 2 items.</p>", html=True
         )
 
-    def test_suggest_button_is_disabled_placeholder(self, get_today_forecast):
+    def test_suggest_form_posts_to_today_page(self, get_today_forecast):
         create_item("White T-shirt")
         response = self.client.get(reverse("suggestions:today"))
         self.assertContains(
             response,
-            '<button type="button" disabled>Suggest an outfit</button>',
+            suggest_form(response, '<button type="submit">Suggest an outfit</button>'),
             html=True,
         )
+        self.assertNotContains(response, "Add some clothes")
+
+    def test_suggest_button_replaced_when_wardrobe_empty(self, get_today_forecast):
+        response = self.client.get(reverse("suggestions:today"))
+        self.assertContains(response, ADD_CLOTHES, html=True)
         self.assertNotContains(response, "<form")
+        self.assertNotContains(response, "Suggest an outfit")
+
+    def test_suggest_button_disabled_when_forecast_unavailable(
+        self, get_today_forecast
+    ):
+        get_today_forecast.side_effect = client.WeatherError(
+            "the weather service timed out"
+        )
+        create_item("White T-shirt")
+        with self.assertLogs("suggestions.views", "WARNING"):
+            response = self.client.get(reverse("suggestions:today"))
+        self.assertContains(
+            response,
+            suggest_form(
+                response, '<button type="submit" disabled>Suggest an outfit</button>'
+            ),
+            html=True,
+        )
+
+    @mock.patch("suggestions.service.suggest_outfit")
+    def test_get_shows_no_suggestion(self, suggest_outfit, get_today_forecast):
+        create_item("White T-shirt")
+        response = self.client.get(reverse("suggestions:today"))
+        suggest_outfit.assert_not_called()
+        self.assertNotIn("suggestion", response.context)
+        self.assertNotContains(response, "Suggested outfit")
+        self.assertNotContains(response, "<table")
 
     def test_page_uses_base_layout_with_today_first_in_nav(self, get_today_forecast):
         response = self.client.get(reverse("suggestions:today"))
@@ -279,6 +336,199 @@ class TodayPageTests(TestCase):
             '<nav><a href="/">Today</a><a href="/wardrobe/">Wardrobe</a></nav>',
             html=True,
         )
+
+
+@mock.patch("weather.client.get_today_forecast", return_value=LISBON_FORECAST)
+@mock.patch("suggestions.service.suggest_outfit")
+class SuggestViewTests(TestCase):
+    def test_post_to_today_url_shows_items_and_reason(
+        self, suggest_outfit, get_today_forecast
+    ):
+        save_wardrobe()
+        suggest_outfit.return_value = service.Suggestion(
+            items=[JEANS, SHIRT, COAT, BOOTS], reason=REASON
+        )
+        response = self.client.post(reverse("suggestions:today"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "suggestions/today.html")
+        # The forecast is fetched again, and sent with the whole wardrobe.
+        get_today_forecast.assert_called_once()
+        suggest_outfit.assert_called_once_with(LISBON_FORECAST, WARDROBE)
+        self.assertContains(response, "<h2>Lisbon, Portugal</h2>", html=True)
+        # The items in the order given, with the wardrobe list's labels, then
+        # the reason.
+        self.assertContains(
+            response,
+            "<h2>Suggested outfit</h2>"
+            "<table><thead><tr>"
+            '<th scope="col">Name</th><th scope="col">Category</th>'
+            '<th scope="col">Colour</th><th scope="col">Size</th>'
+            '<th scope="col">Material</th><th scope="col">Warmth</th>'
+            '<th scope="col">Waterproof</th><th scope="col">Layerable</th>'
+            "</tr></thead><tbody>"
+            '<tr><th scope="row">Blue jeans</th><td>Bottom</td><td>Blue</td>'
+            "<td>W32 L34</td><td>Denim</td><td>3</td><td>No</td><td>No</td></tr>"
+            '<tr><th scope="row">White T-shirt</th><td>Top</td><td>White</td>'
+            "<td>Medium</td><td>Cotton</td><td>1 – very light</td><td>No</td>"
+            "<td>Yes</td></tr>"
+            '<tr><th scope="row">Navy wool coat</th><td>Outer layer</td>'
+            "<td>Navy</td><td>XL</td><td>Wool</td><td>5 – very warm</td>"
+            "<td>No</td><td>No</td></tr>"
+            '<tr><th scope="row">Leather boots</th><td>Shoes</td><td>Brown</td>'
+            "<td>UK 9</td><td>Leather</td><td>3</td><td>Yes</td><td>No</td></tr>"
+            "</tbody></table>"
+            f"<p>{REASON}</p>",
+            html=True,
+        )
+        # The form stays, to ask for another suggestion.
+        self.assertContains(
+            response,
+            suggest_form(response, '<button type="submit">Suggest an outfit</button>'),
+            html=True,
+        )
+
+    def test_reason_is_escaped(self, suggest_outfit, get_today_forecast):
+        save_wardrobe()
+        suggest_outfit.return_value = service.Suggestion(
+            items=[JEANS], reason='Jeans <script>alert("rain")</script> & boots'
+        )
+        response = self.client.post(reverse("suggestions:today"))
+        # The reason is the LLM's text: it is shown as text, never as markup.
+        self.assertContains(
+            response,
+            "<p>Jeans &lt;script&gt;alert(&quot;rain&quot;)&lt;/script&gt; "
+            "&amp; boots</p>",
+        )
+        self.assertNotContains(response, "<script")
+
+    def test_shows_message_when_suggestion_rejected(
+        self, suggest_outfit, get_today_forecast
+    ):
+        save_wardrobe()
+        suggest_outfit.side_effect = service.InvalidSuggestion("chose no items")
+        with self.assertLogs("suggestions.views", "WARNING"):
+            response = self.client.post(reverse("suggestions:today"))
+        self.assertEqual(response.status_code, 200)
+        # The message, then the Suggest form to try again.
+        self.assertContains(
+            response,
+            "<p>Could not get a valid suggestion. Try again.</p>"
+            + suggest_form(
+                response, '<button type="submit">Suggest an outfit</button>'
+            ),
+            html=True,
+        )
+        self.assertNotContains(response, "Suggested outfit")
+        # What was wrong goes to the log, not to the page.
+        self.assertNotContains(response, "chose no items")
+
+    def test_shows_message_when_llm_unavailable(
+        self, suggest_outfit, get_today_forecast
+    ):
+        save_wardrobe()
+        suggest_outfit.side_effect = llm.LLMError("ANTHROPIC_API_KEY is not set")
+        with self.assertLogs("suggestions.views", "WARNING"):
+            response = self.client.post(reverse("suggestions:today"))
+        self.assertEqual(response.status_code, 200)
+        # The Suggest button reads Try again, and posts to the page again.
+        self.assertContains(
+            response,
+            "<p>The suggestion service is unavailable right now.</p>"
+            + suggest_form(response, '<button type="submit">Try again</button>'),
+            html=True,
+        )
+        self.assertNotContains(response, "Suggest an outfit")
+        self.assertNotContains(response, "Suggested outfit")
+        # What went wrong goes to the log, not to the page.
+        self.assertNotContains(response, "ANTHROPIC_API_KEY")
+
+    def test_empty_wardrobe_does_not_call_llm(self, suggest_outfit, get_today_forecast):
+        url = reverse("suggestions:today")
+        response = self.client.post(url)
+        suggest_outfit.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<h2>Lisbon, Portugal</h2>", html=True)
+        self.assertContains(response, ADD_CLOTHES, html=True)
+        # Exactly the page a GET shows.
+        self.assertEqual(response.content, self.client.get(url).content)
+
+    def test_forecast_unavailable_does_not_call_llm(
+        self, suggest_outfit, get_today_forecast
+    ):
+        save_wardrobe()
+        get_today_forecast.side_effect = client.WeatherError(
+            "the weather service timed out"
+        )
+        with self.assertLogs("suggestions.views", "WARNING"):
+            response = self.client.post(reverse("suggestions:today"))
+        suggest_outfit.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "<p>Today's forecast is unavailable: the weather service timed out.</p>",
+            html=True,
+        )
+        self.assertContains(
+            response,
+            suggest_form(
+                response, '<button type="submit" disabled>Suggest an outfit</button>'
+            ),
+            html=True,
+        )
+
+    def test_logs_llm_error_without_traceback(self, suggest_outfit, get_today_forecast):
+        save_wardrobe()
+        http_error = llm.LLMError("the Anthropic API returned an error (HTTP 401)")
+        http_error.__cause__ = status_error(
+            anthropic.AuthenticationError,
+            401,
+            "authentication_error",
+            "invalid x-api-key",
+        )
+        for error, logged in [
+            (
+                llm.LLMError("ANTHROPIC_API_KEY is not set"),
+                "ANTHROPIC_API_KEY is not set (LLMError)",
+            ),
+            (
+                http_error,
+                "the Anthropic API returned an error (HTTP 401) (AuthenticationError)",
+            ),
+        ]:
+            with self.subTest(logged=logged):
+                suggest_outfit.side_effect = error
+                with self.assertLogs("suggestions.views", "WARNING") as logs:
+                    self.client.post(reverse("suggestions:today"))
+                # The message and the class of the original exception, nothing
+                # else.
+                self.assertEqual(
+                    logs.output,
+                    [
+                        (
+                            "WARNING:suggestions.views:"
+                            f"Suggestion service unavailable: {logged}"
+                        )
+                    ],
+                )
+                self.assertIsNone(logs.records[0].exc_info)
+
+    def test_logs_why_suggestion_was_rejected(self, suggest_outfit, get_today_forecast):
+        save_wardrobe()
+        suggest_outfit.side_effect = service.InvalidSuggestion(
+            "used ids that are not in the wardrobe: 42, 99"
+        )
+        with self.assertLogs("suggestions.views", "WARNING") as logs:
+            self.client.post(reverse("suggestions:today"))
+        self.assertEqual(
+            logs.output,
+            [
+                (
+                    "WARNING:suggestions.views:No valid suggestion after one retry: "
+                    "the answer used ids that are not in the wardrobe: 42, 99"
+                )
+            ],
+        )
+        self.assertIsNone(logs.records[0].exc_info)
 
 
 class PromptTests(SimpleTestCase):
