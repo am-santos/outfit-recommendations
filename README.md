@@ -13,30 +13,41 @@ It combines today's weather forecast with the clothes I own, and it adjusts to m
 - **Personal data: only my own.** The app stores my city, my wardrobe and my daily feedback. No other people's personal data is stored or processed.
 - **Uses an existing LLM; no model training.** Outfit suggestions come from an existing, general-purpose LLM, called through its API with the weather forecast, the wardrobe and previous feedback. No model is trained or fine-tuned.
 
-## Planned features
+## Features
 
 ### 1. Wardrobe
-Add, edit and remove clothing items, each with generic attributes, for example:
-- **Type:** top, bottom, outer layer, shoes, accessory
+*Works in the proof of concept.*
+
+Add, edit and remove clothing items, each with these attributes:
+- **Name**
+- **Category:** top, bottom, outer layer, shoes, accessory
 - **Colour**
-- **Size**
-- **Material:** cotton, wool, denim, synthetic…
-- **Warmth level:** 1 (very light) to 5 (very warm)
+- **Size** (optional)
+- **Material:** cotton, wool, denim, leather, linen, synthetic, other
+- **Warmth:** 1 (very light) to 5 (very warm)
 - **Waterproof:** yes / no
 - **Layerable:** yes / no
 
 This list is a starting point. More attributes will be added as they are needed.
 
 ### 2. Forecast
+*Works in the proof of concept.*
+
 Fetch today's forecast for one configured city: temperature, feels-like temperature, chance of rain and wind.
 
 ### 3. Outfit suggestion
-Send today's forecast, the wardrobe and previous feedback to the LLM, and get back an outfit made only from items I own. The response is checked against the wardrobe before it is shown, and any item that isn't in the wardrobe is rejected. Each suggestion says *why* it was chosen.
+*Works in the proof of concept.*
+
+Send today's forecast and the wardrobe to the LLM, and get back an outfit made only from items I own. The response is checked against the wardrobe before it is shown, and it is rejected if any item isn't in the wardrobe. Each suggestion says *why* it was chosen.
 
 ### 4. Daily feedback
+*Planned for the MVP.*
+
 At the end of the day, or the next morning, the app asks how the day's outfit felt: **too warm / just right / too cold / got wet**.
 
 ### 5. Suggestions that use past feedback
+*Planned for the MVP.*
+
 - A **history** of past days: forecast, outfit worn and feedback.
 - Feedback from past days with a similar forecast (for example, within a few degrees of today's feels-like temperature) is included with each new suggestion request, so the suggestions adapt over time. If I often felt cold at 12 °C, the next 12 °C day gets a warmer outfit.
 - Nothing is trained; the history is only used as context for the LLM.
@@ -57,7 +68,7 @@ A Next.js (TypeScript) frontend, so the morning check works well on a phone. It 
 ### PostgreSQL
 Move the database from SQLite to PostgreSQL once the app is deployed to a host where a SQLite file would not persist.
 
-## Planned tech stack
+## Tech stack
 
 | Area | PoC / MVP | Later |
 |---|---|---|
