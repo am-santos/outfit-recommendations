@@ -6,39 +6,42 @@
   <h1>Wardrobe</h1>
   <p><a href="{% url 'wardrobe:add' %}">Add an item</a></p>
   {% if items %}
-    <table>
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Category</th>
-          <th scope="col">Colour</th>
-          <th scope="col">Size</th>
-          <th scope="col">Material</th>
-          <th scope="col">Warmth</th>
-          <th scope="col">Waterproof</th>
-          <th scope="col">Layerable</th>
-          <th scope="col">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in items %}
+    {# On a narrow screen the table scrolls sideways in this box, not the page. #}
+    <div class="table-wrap">
+      <table>
+        <thead>
           <tr>
-            <th scope="row">{{ item.name }}</th>
-            <td>{{ item.get_category_display }}</td>
-            <td>{{ item.colour }}</td>
-            <td>{{ item.size }}</td>
-            <td>{{ item.get_material_display }}</td>
-            <td>{{ item.get_warmth_display }}</td>
-            <td>{{ item.waterproof|yesno:"Yes,No" }}</td>
-            <td>{{ item.layerable|yesno:"Yes,No" }}</td>
-            <td>
-              <a href="{% url 'wardrobe:edit' item.pk %}">Edit</a>
-              <a href="{% url 'wardrobe:delete' item.pk %}">Remove</a>
-            </td>
+            <th scope="col">Name</th>
+            <th scope="col">Category</th>
+            <th scope="col">Colour</th>
+            <th scope="col">Size</th>
+            <th scope="col">Material</th>
+            <th scope="col">Warmth</th>
+            <th scope="col">Waterproof</th>
+            <th scope="col">Layerable</th>
+            <th scope="col">Actions</th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            <tr>
+              <th scope="row">{{ item.name }}</th>
+              <td>{{ item.get_category_display }}</td>
+              <td>{{ item.colour }}</td>
+              <td>{{ item.size }}</td>
+              <td>{{ item.get_material_display }}</td>
+              <td>{{ item.get_warmth_display }}</td>
+              <td>{{ item.waterproof|yesno:"Yes,No" }}</td>
+              <td>{{ item.layerable|yesno:"Yes,No" }}</td>
+              <td>
+                <a href="{% url 'wardrobe:edit' item.pk %}">Edit</a>
+                <a href="{% url 'wardrobe:delete' item.pk %}">Remove</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   {% else %}
     <p>Your wardrobe is empty.</p>
   {% endif %}

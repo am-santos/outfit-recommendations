@@ -378,12 +378,12 @@ class SuggestViewTests(TestCase):
         get_today_forecast.assert_called_once()
         suggest_outfit.assert_called_once_with(LISBON_FORECAST, WARDROBE)
         self.assertContains(response, "<h2>Lisbon, Portugal</h2>", html=True)
-        # The items in the order given, with the wardrobe list's labels, then
-        # the reason.
+        # The items in the order given, with the wardrobe list's labels, in a
+        # box that scrolls sideways on a narrow screen, then the reason.
         self.assertContains(
             response,
             "<h2>Suggested outfit</h2>"
-            "<table><thead><tr>"
+            '<div class="table-wrap"><table><thead><tr>'
             '<th scope="col">Name</th><th scope="col">Category</th>'
             '<th scope="col">Colour</th><th scope="col">Size</th>'
             '<th scope="col">Material</th><th scope="col">Warmth</th>'
@@ -399,7 +399,7 @@ class SuggestViewTests(TestCase):
             "<td>No</td><td>No</td></tr>"
             '<tr><th scope="row">Leather boots</th><td>Shoes</td><td>Brown</td>'
             "<td>UK 9</td><td>Leather</td><td>3</td><td>Yes</td><td>No</td></tr>"
-            "</tbody></table>"
+            "</tbody></table></div>"
             f"<p>{REASON}</p>",
             html=True,
         )

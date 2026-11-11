@@ -136,6 +136,17 @@ class WardrobeListViewTests(TestCase):
         )
         self.assertNotContains(response, "Your wardrobe is empty.")
 
+    def test_table_scrolls_sideways_in_its_own_box(self):
+        # On a phone the table is wider than the screen: its box scrolls, not
+        # the whole page.
+        create_coat()
+        response = self.client.get(reverse("wardrobe:list"))
+        self.assertContains(response, ".table-wrap { overflow-x: auto; }")
+        self.assertRegex(
+            response.content.decode(),
+            r'(?s)<div class="table-wrap">\s*<table>.*</table>\s*</div>',
+        )
+
     def test_url_name_maps_to_wardrobe_path(self):
         self.assertEqual(reverse("wardrobe:list"), "/wardrobe/")
 

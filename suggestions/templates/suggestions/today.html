@@ -22,35 +22,38 @@
   {# Only a POST from the form below shows a suggestion, or why there is none. #}
   {% if suggestion %}
     <h2>Suggested outfit</h2>
-    <table>
-      <thead>
-        <tr>
-          <th scope="col">Name</th>
-          <th scope="col">Category</th>
-          <th scope="col">Colour</th>
-          <th scope="col">Size</th>
-          <th scope="col">Material</th>
-          <th scope="col">Warmth</th>
-          <th scope="col">Waterproof</th>
-          <th scope="col">Layerable</th>
-        </tr>
-      </thead>
-      <tbody>
-        {# In the order the suggestion gives them. #}
-        {% for item in suggestion.items %}
+    {# On a narrow screen the table scrolls sideways in this box, not the page. #}
+    <div class="table-wrap">
+      <table>
+        <thead>
           <tr>
-            <th scope="row">{{ item.name }}</th>
-            <td>{{ item.get_category_display }}</td>
-            <td>{{ item.colour }}</td>
-            <td>{{ item.size }}</td>
-            <td>{{ item.get_material_display }}</td>
-            <td>{{ item.get_warmth_display }}</td>
-            <td>{{ item.waterproof|yesno:"Yes,No" }}</td>
-            <td>{{ item.layerable|yesno:"Yes,No" }}</td>
+            <th scope="col">Name</th>
+            <th scope="col">Category</th>
+            <th scope="col">Colour</th>
+            <th scope="col">Size</th>
+            <th scope="col">Material</th>
+            <th scope="col">Warmth</th>
+            <th scope="col">Waterproof</th>
+            <th scope="col">Layerable</th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {# In the order the suggestion gives them. #}
+          {% for item in suggestion.items %}
+            <tr>
+              <th scope="row">{{ item.name }}</th>
+              <td>{{ item.get_category_display }}</td>
+              <td>{{ item.colour }}</td>
+              <td>{{ item.size }}</td>
+              <td>{{ item.get_material_display }}</td>
+              <td>{{ item.get_warmth_display }}</td>
+              <td>{{ item.waterproof|yesno:"Yes,No" }}</td>
+              <td>{{ item.layerable|yesno:"Yes,No" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <p>{{ suggestion.reason|linebreaksbr }}</p>
   {% elif suggestion_rejected %}
     <p>Could not get a valid suggestion. Try again.</p>
