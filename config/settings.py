@@ -34,6 +34,10 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG") == "True"
 
+# Error pages and reports hide the variables marked as sensitive, such as the
+# Anthropic API key, even when DEBUG is True.
+DEFAULT_EXCEPTION_REPORTER_FILTER = "config.error_reports.AlwaysActiveFilter"
+
 # Local use only: the app is served by runserver on this machine.
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 

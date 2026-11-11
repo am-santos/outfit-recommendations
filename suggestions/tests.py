@@ -11,6 +11,7 @@ import httpx2
 import requests
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
+from django.views import debug
 
 from suggestions import llm, service
 from wardrobe import models
@@ -946,3 +947,60 @@ class EndToEndTests(TestCase):
         )
         self.assertNotIn(FAKE_KEY.encode(), response.content)
         self.assertNotIn(FAKE_KEY, "\n".join(logs.output))
+
+
+def forget_reporter_filter() -> None:
+    """Make Django build its error-report filter again from the setting.
+
+    Django builds the filter once and keeps it, so a test that changes the
+    setting must clear it before and after.
+    """
+    built_once = debug.get_default_exception_reporter_filter
+    # The stubs declare a plain function, without functools' cache_clear.
+    built_once.cache_clear()  # type: ignore[attr-defined]
+
+
+# Django's default filter, which is active only when DEBUG is False.
+DJANGO_FILTER = "django.views.debug.SafeExceptionReporterFilter"
+
+
+# The SDK's client fails with an error that complete_json does not expect, so
+# the POST ends in Django's debug page. The mock's frames, called from
+# complete_json, hold the key in their keyword arguments, as the SDK's would.
+# Nothing is sent.
+@override_settings(DEBUG=True)
+@mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": FAKE_KEY})
+@mock.patch("weather.client.get_today_forecast", return_value=LISBON_FORECAST)
+@mock.patch("suggestions.llm.anthropic.Anthropic", side_effect=RuntimeError)
+class DebugPageTests(TestCase):
+    def setUp(self):
+        forget_reporter_filter()
+        self.addCleanup(forget_reporter_filter)
+        save_wardrobe()
+
+    def debug_page(self) -> str:
+        """Ask for a suggestion and return the page Django shows instead."""
+        with self.assertLogs("django.request", "ERROR"):
+            # As on runserver, which copies the process environment into
+            # request.META, the key is in META as well.
+            response = Client(raise_request_exception=False).post(
+                reverse("suggestions:today"), ANTHROPIC_API_KEY=FAKE_KEY
+            )
+        self.assertEqual(response.status_code, 500)
+        return response.content.decode()
+
+    def test_debug_page_hides_the_key(self, Anthropic, get_today_forecast):
+        page = self.debug_page()
+        self.assertNotIn(FAKE_KEY, page)
+        # complete_json's variables are listed with Django's substitute value.
+        self.assertInHTML(
+            "<tr><td>key</td>"
+            "<td class=\"code\"><pre>'********************'</pre></td></tr>",
+            page,
+        )
+
+    @override_settings(DEFAULT_EXCEPTION_REPORTER_FILTER=DJANGO_FILTER)
+    def test_django_filter_alone_shows_the_key(self, Anthropic, get_today_forecast):
+        # Django's own filter hides nothing while DEBUG is True, so this page
+        # shows the key: the test above would see a leak.
+        self.assertIn(FAKE_KEY, self.debug_page())

@@ -2,8 +2,9 @@
 
 Everything provider-specific lives here, so changing provider means rewriting
 this module and nothing else. The API key is read from the environment on each
-call; it is never put in settings, printed or logged. Every failure becomes an
-LLMError whose message is short and safe to show.
+call; it is never put in settings, printed or logged, and Django's error pages
+hide it. Every failure becomes an LLMError whose message is short and safe to
+show.
 """
 
 import json
@@ -12,6 +13,7 @@ from typing import Any
 
 import anthropic
 from django.conf import settings
+from django.views.decorators.debug import sensitive_variables
 
 # Thinking tokens count towards this limit, so it leaves room for them as well
 # as the answer.
@@ -33,6 +35,10 @@ class LLMError(Exception):
     """
 
 
+# With no names given, Django's error pages hide every variable of this
+# function and of every function it calls, so the SDK's frames, which hold the
+# key, are hidden too. config.error_reports makes this work when DEBUG is True.
+@sensitive_variables()
 def complete_json(system: str, user: str, schema: dict[str, Any]) -> dict[str, Any]:
     """Send a prompt, return the parsed JSON object. Raises LLMError.
 
