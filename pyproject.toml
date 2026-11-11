@@ -20,6 +20,8 @@ dev = [
 [tool.mypy]
 plugins = ["mypy_django_plugin.main"]
 strict = true
+# Skip files git ignores, such as local notes and scripts, as ruff does.
+exclude_gitignore = true
 
 [[tool.mypy.overrides]]
 module = "*.migrations.*"
