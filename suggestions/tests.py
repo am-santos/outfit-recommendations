@@ -654,6 +654,7 @@ class PromptTests(SimpleTestCase):
             "warmth, waterproof and layerable",
             "1 (very light) to 5 (very warm)",
             "one bottom, one pair of shoes",
+            "refer to items by name, never by id",
             "say so in the reason",
             "Use British English.",
         ]:
@@ -694,10 +695,38 @@ class ValidationTests(SimpleTestCase):
             {"item_ids": [9, 3], "reason": None},
             {"item_ids": [9, 3], "reason": ""},
             {"item_ids": [9, 3], "reason": "   "},
+            # Nothing is left once the ids are removed.
+            {"item_ids": [9, 3], "reason": "(9) (3)"},
         ]
         for answer in answers:
             with self.subTest(answer=answer):
                 self.assertEqual(rejection_message(answer), "gave no reason")
+
+    def test_ids_quoted_in_reason_are_removed(self):
+        # The page shows the reason, and the ids mean nothing to the user. An id
+        # of a wardrobe item in brackets goes, with the space before it.
+        answer = {
+            "item_ids": [7, 3, 9, 12],
+            "reason": (
+                "The Navy wool coat (7) over the White T-shirt (id 3), with the "
+                "Blue jeans (ID: 9) and the Leather boots (#12). The Grey scarf "
+                "(14) is not needed."
+            ),
+        }
+        self.assertEqual(
+            service.parse_suggestion(answer, ITEMS_BY_ID).reason,
+            "The Navy wool coat over the White T-shirt, with the Blue jeans and "
+            "the Leather boots. The Grey scarf is not needed.",
+        )
+
+    def test_other_numbers_in_brackets_stay_in_reason(self):
+        # 9 is the jeans' id, but here it is part of other text in brackets.
+        reason = (
+            "The coat (warmth 5) for a low of 11.7 °C (feels like 9), boots (UK 9) "
+            "for the rain (60%), and nothing for item (42), which is not yours."
+        )
+        answer = {"item_ids": [7, 12], "reason": reason}
+        self.assertEqual(service.parse_suggestion(answer, ITEMS_BY_ID).reason, reason)
 
     def test_item_ids_must_be_a_list_of_integers(self):
         # JSON true loads as True, which Python would treat as the id 1.

@@ -5,6 +5,7 @@ the items it chose and a reason. The answer is checked against the wardrobe
 before it is used; an invalid answer gets one retry.
 """
 
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -33,9 +34,15 @@ SYSTEM_PROMPT = (
     "(very light) to 5 (very warm). Choose one bottom, one pair of shoes, one or "
     "more tops or outer layers as needed, and accessories if useful. Answer with "
     "the chosen ids in item_ids and a short explanation of the choice in reason. "
-    "If the wardrobe cannot cover the weather, say so in the reason, for example "
-    '"you have no waterproof layer". Use British English.'
+    "The user sees the reason but not the ids, so in the reason refer to items "
+    "by name, never by id. If the wardrobe cannot cover the weather, say so in "
+    'the reason, for example "you have no waterproof layer". Use British English.'
 )
+
+# An id from the wardrobe list in brackets, as the LLM may still quote it after
+# an item's name: "(18)", "(id 18)", "(ID: 18)" or "(#18)", with the space
+# before it.
+QUOTED_ID = re.compile(r"[ \t]*\(\s*(?:id\s*:?|#)?\s*(\d+)\s*\)", re.IGNORECASE)
 
 
 class InvalidSuggestion(Exception):
@@ -96,7 +103,8 @@ def parse_suggestion(
     """Check the LLM's answer against the wardrobe and return the suggestion.
 
     Any problem rejects the whole answer with InvalidSuggestion: an outfit with
-    an unknown item left out could be missing its trousers.
+    an unknown item left out could be missing its trousers. Any wardrobe id
+    the reason quotes is removed from it, as the page shows items by name.
     """
     item_ids = data.get("item_ids")
     # An exact type check: JSON true and false load as bool, a subclass of int.
@@ -113,9 +121,16 @@ def parse_suggestion(
             f"used ids that are not in the wardrobe: {_list_ids(unknown)}"
         )
     reason = data.get("reason")
+    if isinstance(reason, str):
+        reason = _without_ids(reason, items_by_id)
     if not isinstance(reason, str) or not reason.strip():
         raise InvalidSuggestion("gave no reason")
     return Suggestion(items=tuple(items_by_id[i] for i in item_ids), reason=reason)
+
+
+def _without_ids(reason: str, items_by_id: Mapping[int, models.ClothingItem]) -> str:
+    """The reason without the wardrobe ids it quotes; other brackets stay."""
+    return QUOTED_ID.sub(lambda m: "" if int(m[1]) in items_by_id else m[0], reason)
 
 
 def _forecast_section(forecast: client.Forecast) -> str:
